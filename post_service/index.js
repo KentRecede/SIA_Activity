@@ -1,7 +1,11 @@
 const { ApolloServer, gql } = require("apollo-server");
 const { PrismaClient } = require("@prisma/client");
+const { PubSub } = require("graphql-subscriptions");
 
 const prisma = new PrismaClient();
+const pubsub = new PubSub();
+
+const POST_ADDED = "POST_ADDED";
 
 const typeDefs = gql`
   type Post {
@@ -12,27 +16,32 @@ const typeDefs = gql`
 
   type Query {
     posts: [Post]
-    post(id: ID!): Post
   }
 
   type Mutation {
     createPost(title: String!, content: String!): Post
-    updatePost(id: ID!, title: String, content: String): Post
-    deletePost(id: ID!): Post
+  }
+
+  type Subscription {
+    postAdded: Post
   }
 `;
 
 const resolvers = {
   Query: {
     posts: () => prisma.post.findMany(),
-    post: (_, args) => prisma.post.findUnique({ where: { id: parseInt(args.id) } }),
   },
   Mutation: {
-    createPost: (_, args) => prisma.post.create({ data: args }),
-    updatePost: (_, args) =>
-      prisma.post.update({ where: { id: parseInt(args.id) }, data: args }),
-    deletePost: (_, args) =>
-      prisma.post.delete({ where: { id: parseInt(args.id) } }),
+    createPost: async (_, args) => {
+      const post = await prisma.post.create({ data: args });
+      pubsub.publish(POST_ADDED, { postAdded: post });
+      return post;
+    },
+  },
+  Subscription: {
+    postAdded: {
+      subscribe: () => pubsub.asyncIterator([POST_ADDED]),
+    },
   },
 };
 
